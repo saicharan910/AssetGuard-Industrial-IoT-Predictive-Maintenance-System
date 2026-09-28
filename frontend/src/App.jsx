@@ -26,12 +26,28 @@ function App() {
     }
   };
 
+
   const handleGenerateReport = async () => {
     try {
       setReportStatus("Generating report...");
-      const { data } = await axios.get(`${API_BASE_URL}/api/report`);
-      setReportStatus(`Done. Found ${data.total_anomalies_detected} anomalies.`);
+      const response = await axios.get(`${API_BASE_URL}/api/report`, {
+        responseType: 'blob',
+      });
+
+      // Create a temporary downloadable link for the blob
+      const blob = new Blob([response.data], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', 'assetguard_equipment_report.csv');
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+
+      setReportStatus("Report downloaded successfully.");
     } catch (err) {
+      console.error("Report download error:", err);
       setReportStatus("Report generation failed.");
     }
   };

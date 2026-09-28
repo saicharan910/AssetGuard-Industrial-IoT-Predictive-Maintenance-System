@@ -1,4 +1,6 @@
 import os
+import io
+from fastapi.responses import StreamingResponse
 import random
 from datetime import datetime
 import pandas as pd
@@ -80,18 +82,22 @@ def get_history(limit: int = 30, db: Session = Depends(get_db)):
     return db.query(TelemetryRecord).order_by(TelemetryRecord.id.desc()).limit(limit).all()[::-1]
 
 @app.get("/api/report")
-def trigger_report():
+def export_report():
     df = pd.read_sql("SELECT * FROM telemetry", con=engine)
     if df.empty:
         return {"message": "No data available."}
-    
-    total_warnings = len(df[df['health_status'] == "Warning: High Risk"])
-    df.to_csv("equipment_report.csv", index=False)
-    
-    return {
-        "status": "Report generated", 
-        "total_anomalies_detected": total_warnings
-    }
+
+    # Convert DataFrame into an in-memory CSV text stream
+    stream = io.StringIO()
+    df.to_csv(stream, index=False)
+
+    response = StreamingResponse(
+        iter([stream.getvalue()]), 
+        media_type="text/csv"
+    )
+    response.headers["Content-Disposition"] = "attachment; filename=assetguard_equipment_report.csv"
+    return response
+
 
 @app.get("/")
 def root():
