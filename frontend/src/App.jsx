@@ -3,15 +3,21 @@ import axios from 'axios';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import './App.css';
 
+const ASSET_DESCRIPTIONS = {
+  "MTR-001": "Primary mechanical drive motor unit",
+  "PUMP-101": "Fluid transfer coolant pump system",
+  "FAN-042": "Exhaust airflow cooling blower unit"
+};
+
 function App() {
   const [history, setHistory] = useState([]);
   const [current, setCurrent] = useState(null);
   const [selectedAsset, setSelectedAsset] = useState("MTR-001");
+  const [hoveredAsset, setHoveredAsset] = useState(null);
   const [reportStatus, setReportStatus] = useState("");
   const wsRef = useRef(null);
 
   const API_BASE_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
-  // Convert http/https URL scheme to ws/wss for WebSocket handshake
   const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws');
 
   useEffect(() => {
@@ -80,16 +86,33 @@ function App() {
     <div className="dashboard-container">
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h1>AssetGuard IIoT Monitor</h1>
-        <select
-          value={selectedAsset}
-          onChange={(e) => setSelectedAsset(e.target.value)}
-          className="btn-primary"
-          style={{ padding: '0.5rem 1rem', fontSize: '0.95rem' }}
+
+        {/* Dropdown Container with Hover Tooltip */}
+        <div
+          className="select-wrapper"
+          onMouseEnter={() => setHoveredAsset(selectedAsset)}
+          onMouseLeave={() => setHoveredAsset(null)}
         >
-          <option value="MTR-001">Motor (MTR-001)</option>
-          <option value="PUMP-101">Pump (PUMP-101)</option>
-          <option value="FAN-042">Fan (FAN-042)</option>
-        </select>
+          <select
+            value={selectedAsset}
+            onChange={(e) => {
+              setSelectedAsset(e.target.value);
+              setHoveredAsset(e.target.value);
+            }}
+            className="btn-primary"
+            style={{ padding: '0.5rem 1rem', fontSize: '0.95rem', cursor: 'pointer' }}
+          >
+            <option value="MTR-001">Motor (MTR-001)</option>
+            <option value="PUMP-101">Pump (PUMP-101)</option>
+            <option value="FAN-042">Fan (FAN-042)</option>
+          </select>
+
+          {hoveredAsset && (
+            <div className="asset-tooltip">
+              {ASSET_DESCRIPTIONS[hoveredAsset]}
+            </div>
+          )}
+        </div>
       </header>
 
       <main className="dashboard-grid">
