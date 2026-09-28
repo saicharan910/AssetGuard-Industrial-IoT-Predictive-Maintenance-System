@@ -92,3 +92,7 @@ def trigger_report():
         "status": "Report generated", 
         "total_anomalies_detected": total_warnings
     }
+
+@app.get("/")
+def root():
+    return {"status": "online", "message": "AssetGuard IIoT API is running"}
