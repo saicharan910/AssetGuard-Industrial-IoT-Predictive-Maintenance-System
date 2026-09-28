@@ -81,13 +81,13 @@ def get_live_telemetry(db: Session = Depends(get_db)):
 def get_history(limit: int = 30, db: Session = Depends(get_db)):
     return db.query(TelemetryRecord).order_by(TelemetryRecord.id.desc()).limit(limit).all()[::-1]
 
+
 @app.get("/api/report")
 def export_report():
     df = pd.read_sql("SELECT * FROM telemetry", con=engine)
     if df.empty:
         return {"message": "No data available."}
 
-    # Convert DataFrame into an in-memory CSV text stream
     stream = io.StringIO()
     df.to_csv(stream, index=False)
 

@@ -29,29 +29,29 @@ function App() {
 
   const handleGenerateReport = async () => {
     try {
-      setReportStatus("Generating report...");
+      setReportStatus("Downloading CSV...");
       const response = await axios.get(`${API_BASE_URL}/api/report`, {
         responseType: 'blob',
       });
 
-      // Create a temporary downloadable link for the blob
+      // Create browser download link for the CSV blob
       const blob = new Blob([response.data], { type: 'text/csv' });
-      const url = window.URL.createObjectURL(blob);
+      const downloadUrl = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.href = url;
+      link.href = downloadUrl;
       link.setAttribute('download', 'assetguard_equipment_report.csv');
       document.body.appendChild(link);
       link.click();
       link.remove();
-      window.URL.revokeObjectURL(url);
+      window.URL.revokeObjectURL(downloadUrl);
 
-      setReportStatus("Report downloaded successfully.");
+      setReportStatus("CSV downloaded successfully!");
     } catch (err) {
-      console.error("Report download error:", err);
-      setReportStatus("Report generation failed.");
+      console.error("Export error:", err);
+      setReportStatus("Report export failed.");
     }
   };
-
+  
   useEffect(() => {
     fetchTelemetry();
     const intervalId = setInterval(fetchTelemetry, 2000);
