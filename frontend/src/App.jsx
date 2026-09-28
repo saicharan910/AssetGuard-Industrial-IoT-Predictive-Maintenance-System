@@ -1,0 +1,90 @@
+import { useState, useEffect } from 'react';
+import axios from 'axios';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import './App.css';
+
+function App() {
+  const [history, setHistory] = useState([]);
+  const [current, setCurrent] = useState(null);
+  const [reportStatus, setReportStatus] = useState("");
+
+  const fetchTelemetry = async () => {
+    try {
+      const { data: liveData } = await axios.get('http://127.0.0.1:8000/api/telemetry');
+      setCurrent(liveData);
+
+      const { data: historyData } = await axios.get('http://127.0.0.1:8000/api/history');
+      const chartData = historyData.map(row => ({
+        ...row,
+        time: new Date(row.timestamp).toLocaleTimeString(),
+      }));
+      setHistory(chartData);
+    } catch (err) {
+      console.error("Dashboard error:", err);
+    }
+  };
+
+  const handleGenerateReport = async () => {
+    try {
+      setReportStatus("Generating report...");
+      const { data } = await axios.get('http://127.0.0.1:8000/api/report');
+      setReportStatus(`Done. Found ${data.total_anomalies_detected} anomalies.`);
+    } catch (err) {
+      setReportStatus("Report generation failed.");
+    }
+  };
+
+  useEffect(() => {
+    fetchTelemetry();
+    const intervalId = setInterval(fetchTelemetry, 2000);
+    return () => clearInterval(intervalId);
+  }, []);
+
+  return (
+    <div className="dashboard-container">
+      <header>
+        <h1>AssetGuard IIoT Monitor</h1>
+      </header>
+
+      <main className="dashboard-grid">
+        {current && (
+          <section className="card status-card">
+            <h2>ID: {current.equipment_id}</h2>
+            <div className="metrics">
+              <p>Temp: {current.temperature_celsius} °C</p>
+              <p>Vib: {current.vibration_mm_s} mm/s</p>
+              <p className={`status ${current.health_status.includes('Warning') ? 'danger' : 'safe'}`}>
+                {current.health_status}
+              </p>
+            </div>
+          </section>
+        )}
+
+        <section className="card actions-card">
+          <h2>Analytics Engine</h2>
+          <button onClick={handleGenerateReport} className="btn-primary">
+            Export Pandas CSV
+          </button>
+          {reportStatus && <p className="status-msg">{reportStatus}</p>}
+        </section>
+      </main>
+
+      <section className="chart-section">
+        <ResponsiveContainer width="100%" height={350}>
+          <LineChart data={history}>
+            <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+            <XAxis dataKey="time" />
+            <YAxis yAxisId="left" domain={['dataMin - 5', 'dataMax + 5']} />
+            <YAxis yAxisId="right" orientation="right" domain={[0, 7]} />
+            <Tooltip />
+            <Legend />
+            <Line yAxisId="left" type="monotone" dataKey="temperature_celsius" stroke="#2563eb" name="Temp (°C)" dot={false} strokeWidth={2} />
+            <Line yAxisId="right" type="monotone" dataKey="vibration_mm_s" stroke="#dc2626" name="Vibration" dot={false} strokeWidth={2} />
+          </LineChart>
+        </ResponsiveContainer>
+      </section>
+    </div>
+  );
+}
+
+export default App;
