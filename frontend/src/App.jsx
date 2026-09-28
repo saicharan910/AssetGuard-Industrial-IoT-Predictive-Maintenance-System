@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import './App.css';
@@ -6,27 +6,52 @@ import './App.css';
 function App() {
   const [history, setHistory] = useState([]);
   const [current, setCurrent] = useState(null);
+  const [selectedAsset, setSelectedAsset] = useState("MTR-001");
   const [reportStatus, setReportStatus] = useState("");
+  const wsRef = useRef(null);
 
   const API_BASE_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+  // Convert http/https URL scheme to ws/wss for WebSocket handshake
+  const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws');
 
-  const fetchTelemetry = async () => {
-    try {
-      const { data: liveData } = await axios.get(`${API_BASE_URL}/api/telemetry`);
-      setCurrent(liveData);
+  useEffect(() => {
+    // 1. Load initial history for chosen asset
+    axios.get(`${API_BASE_URL}/api/history/${selectedAsset}`)
+      .then(({ data }) => {
+        const chartData = data.map(row => ({
+          ...row,
+          time: new Date(row.timestamp).toLocaleTimeString(),
+        }));
+        setHistory(chartData);
+      })
+      .catch(err => console.error("Initial load error:", err));
 
-      const { data: historyData } = await axios.get(`${API_BASE_URL}/api/history`);
-      const chartData = historyData.map(row => ({
-        ...row,
-        time: new Date(row.timestamp).toLocaleTimeString(),
-      }));
-      setHistory(chartData);
-    } catch (err) {
-      console.error("Dashboard error:", err);
+    // 2. Open persistent WebSocket stream
+    if (wsRef.current) {
+      wsRef.current.close();
     }
-  };
 
+    const socket = new WebSocket(`${WS_BASE_URL}/ws/telemetry/${selectedAsset}`);
+    wsRef.current = socket;
 
+    socket.onmessage = (event) => {
+      const liveData = JSON.parse(event.data);
+      setCurrent(liveData);
+      setHistory(prev => {
+        const updated = [...prev, {
+          ...liveData,
+          time: new Date(liveData.timestamp).toLocaleTimeString()
+        }];
+        return updated.slice(-30);
+      });
+    };
+
+    return () => {
+      socket.close();
+    };
+  }, [selectedAsset, API_BASE_URL, WS_BASE_URL]);
+
+  // 3. Direct Browser CSV Download
   const handleGenerateReport = async () => {
     try {
       setReportStatus("Downloading CSV...");
@@ -34,34 +59,37 @@ function App() {
         responseType: 'blob',
       });
 
-      // Create browser download link for the CSV blob
       const blob = new Blob([response.data], { type: 'text/csv' });
       const downloadUrl = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = downloadUrl;
-      link.setAttribute('download', 'assetguard_equipment_report.csv');
+      link.setAttribute('download', 'assetguard_ml_report.csv');
       document.body.appendChild(link);
       link.click();
       link.remove();
       window.URL.revokeObjectURL(downloadUrl);
 
-      setReportStatus("CSV downloaded successfully!");
+      setReportStatus("Report downloaded successfully.");
     } catch (err) {
       console.error("Export error:", err);
-      setReportStatus("Report export failed.");
+      setReportStatus("Export failed.");
     }
   };
-  
-  useEffect(() => {
-    fetchTelemetry();
-    const intervalId = setInterval(fetchTelemetry, 2000);
-    return () => clearInterval(intervalId);
-  }, []);
 
   return (
     <div className="dashboard-container">
-      <header>
+      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h1>AssetGuard IIoT Monitor</h1>
+        <select
+          value={selectedAsset}
+          onChange={(e) => setSelectedAsset(e.target.value)}
+          className="btn-primary"
+          style={{ padding: '0.5rem 1rem', fontSize: '0.95rem' }}
+        >
+          <option value="MTR-001">Motor (MTR-001)</option>
+          <option value="PUMP-101">Pump (PUMP-101)</option>
+          <option value="FAN-042">Fan (FAN-042)</option>
+        </select>
       </header>
 
       <main className="dashboard-grid">
@@ -69,8 +97,8 @@ function App() {
           <section className="card status-card">
             <h2>ID: {current.equipment_id}</h2>
             <div className="metrics">
-              <p>Temp: {current.temperature_celsius} °C</p>
-              <p>Vib: {current.vibration_mm_s} mm/s</p>
+              <p>Temp: {Number(current.temperature_celsius).toFixed(2)} °C</p>
+              <p>Vib: {Number(current.vibration_mm_s).toFixed(2)} mm/s</p>
               <p className={`status ${current.health_status.includes('Warning') ? 'danger' : 'safe'}`}>
                 {current.health_status}
               </p>
@@ -79,7 +107,7 @@ function App() {
         )}
 
         <section className="card actions-card">
-          <h2>Analytics Engine</h2>
+          <h2>ML Analytics Engine</h2>
           <button onClick={handleGenerateReport} className="btn-primary">
             Export Pandas CSV
           </button>
@@ -88,16 +116,16 @@ function App() {
       </main>
 
       <section className="chart-section">
-        <ResponsiveContainer height={350} width="100%">
+        <ResponsiveContainer width="100%" height={350}>
           <LineChart data={history}>
-            <CartesianGrid opacity={0.3} strokeDasharray="3 3" />
+            <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
             <XAxis dataKey="time" />
             <YAxis yAxisId="left" domain={['dataMin - 5', 'dataMax + 5']} />
             <YAxis yAxisId="right" orientation="right" domain={[0, 7]} />
             <Tooltip />
             <Legend />
-            <Line yAxisId="left" type="monotone" dataKey="temperature_celsius" stroke="#2563eb" name="Temp (°C)" dot={false} strokeWidth={2} />
-            <Line yAxisId="right" type="monotone" dataKey="vibration_mm_s" stroke="#dc2626" name="Vibration" dot={false} strokeWidth={2} />
+            <Line yAxisId="left" type="monotone" dataKey="temperature_celsius" stroke="#2563eb" name="Temp (°C)" dot={false} strokeWidth={2} isAnimationActive={false} />
+            <Line yAxisId="right" type="monotone" dataKey="vibration_mm_s" stroke="#dc2626" name="Vibration" dot={false} strokeWidth={2} isAnimationActive={false} />
           </LineChart>
         </ResponsiveContainer>
       </section>

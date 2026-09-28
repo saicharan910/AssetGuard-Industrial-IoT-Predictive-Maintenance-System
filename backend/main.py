@@ -1,25 +1,28 @@
 import os
 import io
-from fastapi.responses import StreamingResponse
+import json
 import random
+import asyncio
 from datetime import datetime
 import pandas as pd
-from fastapi import FastAPI, Depends
+import numpy as np
+from sklearn.ensemble import IsolationForest
+
+from fastapi import FastAPI, Depends, WebSocket, WebSocketDisconnect
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
 
-# Database Setup: Supports both local SQLite and Cloud PostgreSQL
+# 1. Database Setup
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./telemetry.db")
-
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-if DATABASE_URL.startswith("sqlite"):
-    engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
-else:
-    engine = create_engine(DATABASE_URL)
-
+engine = create_engine(
+    DATABASE_URL, 
+    connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -35,15 +38,28 @@ class TelemetryRecord(Base):
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
-
 app.add_middleware(
-    CORSMiddleware, 
-    allow_origins=["*"], 
-    allow_methods=["*"], 
-    allow_headers=["*"]
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-sensor_state = {"temp": 75.0, "vib": 2.0}
+# 2. Multi-Asset Profiles & ML Baseline
+ASSETS = {
+    "MTR-001": {"temp": 75.0, "vib": 2.0},
+    "PUMP-101": {"temp": 60.0, "vib": 1.5},
+    "FAN-042": {"temp": 45.0, "vib": 1.0}
+}
+
+# Baseline normal operational dataset to fit Isolation Forest
+X_baseline = np.array([
+    [75.0, 2.0], [74.5, 2.1], [76.0, 1.9], [73.8, 2.2],
+    [60.0, 1.5], [59.5, 1.6], [61.0, 1.4], [58.9, 1.5],
+    [45.0, 1.0], [44.8, 1.1], [46.2, 0.9], [43.9, 1.2]
+])
+ml_model = IsolationForest(contamination=0.08, random_state=42)
+ml_model.fit(X_baseline)
 
 def get_db():
     db = SessionLocal()
@@ -52,36 +68,59 @@ def get_db():
     finally:
         db.close()
 
-@app.get("/api/telemetry")
-def get_live_telemetry(db: Session = Depends(get_db)):
-    global sensor_state
+@app.get("/")
+def root():
+    return {"status": "online", "message": "AssetGuard IIoT ML Engine is running"}
+
+# 3. WebSocket Real-Time Stream with Machine Learning
+@app.websocket("/ws/telemetry/{equipment_id}")
+async def websocket_telemetry(websocket: WebSocket, equipment_id: str, db: Session = Depends(get_db)):
+    await websocket.accept()
+    if equipment_id not in ASSETS:
+        equipment_id = "MTR-001"
     
-    sensor_state["temp"] += random.uniform(-1.5, 2.0)
-    sensor_state["vib"] += random.uniform(-0.2, 0.3)
-    sensor_state["temp"] = max(60.0, min(sensor_state["temp"], 110.0))
-    sensor_state["vib"] = max(1.0, min(sensor_state["vib"], 6.0))
+    try:
+        while True:
+            state = ASSETS[equipment_id]
+            state["temp"] += random.uniform(-1.8, 2.2)
+            state["vib"] += random.uniform(-0.25, 0.35)
+            
+            temp = round(max(20.0, min(state["temp"], 115.0)), 2)
+            vib = round(max(0.5, min(state["vib"], 7.0)), 2)
+            
+            # Machine Learning Inference: -1 indicates anomaly, 1 indicates normal
+            prediction = ml_model.predict([[temp, vib]])[0]
+            status = "Warning: High Risk (ML Detected)" if prediction == -1 else "Optimal"
+            
+            record = TelemetryRecord(
+                equipment_id=equipment_id,
+                temperature_celsius=temp,
+                vibration_mm_s=vib,
+                health_status=status
+            )
+            db.add(record)
+            db.commit()
+            db.refresh(record)
+            
+            await websocket.send_json({
+                "id": record.id,
+                "timestamp": record.timestamp.isoformat(),
+                "equipment_id": equipment_id,
+                "temperature_celsius": temp,
+                "vibration_mm_s": vib,
+                "health_status": status
+            })
+            await asyncio.sleep(1)
+    except WebSocketDisconnect:
+        pass
 
-    temp = round(sensor_state["temp"], 2)
-    vib = round(sensor_state["vib"], 2)
-    status = "Warning: High Risk" if temp > 90.0 or vib > 4.5 else "Optimal"
-    
-    record = TelemetryRecord(
-        equipment_id="MTR-001", 
-        temperature_celsius=temp, 
-        vibration_mm_s=vib, 
-        health_status=status
-    )
-    
-    db.add(record)
-    db.commit()
-    db.refresh(record)
-    return record
+@app.get("/api/history/{equipment_id}")
+def get_history(equipment_id: str, limit: int = 30, db: Session = Depends(get_db)):
+    return db.query(TelemetryRecord).filter(
+        TelemetryRecord.equipment_id == equipment_id
+    ).order_by(TelemetryRecord.id.desc()).limit(limit).all()[::-1]
 
-@app.get("/api/history")
-def get_history(limit: int = 30, db: Session = Depends(get_db)):
-    return db.query(TelemetryRecord).order_by(TelemetryRecord.id.desc()).limit(limit).all()[::-1]
-
-
+# 4. Direct CSV File Download Endpoint
 @app.get("/api/report")
 def export_report():
     df = pd.read_sql("SELECT * FROM telemetry", con=engine)
@@ -90,15 +129,7 @@ def export_report():
 
     stream = io.StringIO()
     df.to_csv(stream, index=False)
-
-    response = StreamingResponse(
-        iter([stream.getvalue()]), 
-        media_type="text/csv"
-    )
-    response.headers["Content-Disposition"] = "attachment; filename=assetguard_equipment_report.csv"
+    
+    response = StreamingResponse(iter([stream.getvalue()]), media_type="text/csv")
+    response.headers["Content-Disposition"] = "attachment; filename=assetguard_ml_report.csv"
     return response
-
-
-@app.get("/")
-def root():
-    return {"status": "online", "message": "AssetGuard IIoT API is running"}
