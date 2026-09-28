@@ -6,12 +6,11 @@ import random
 from datetime import datetime
 import pandas as pd
 
-# 1. Database Setup
+# Database Setup
 engine = create_engine("sqlite:///./telemetry.db", connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# 2. Database Model
 class TelemetryRecord(Base):
     __tablename__ = "telemetry"
     id = Column(Integer, primary_key=True, index=True)
@@ -23,7 +22,7 @@ class TelemetryRecord(Base):
 
 Base.metadata.create_all(bind=engine)
 
-# 3. FastAPI App Setup
+# FastAPI Setup
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
@@ -36,7 +35,6 @@ def get_db():
     finally:
         db.close()
 
-# 4. API Endpoints
 @app.get("/api/telemetry")
 def get_live_telemetry(db: Session = Depends(get_db)):
     global sensor_state
