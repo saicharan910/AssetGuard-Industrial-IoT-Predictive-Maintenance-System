@@ -8,12 +8,14 @@ function App() {
   const [current, setCurrent] = useState(null);
   const [reportStatus, setReportStatus] = useState("");
 
+  const API_BASE_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+
   const fetchTelemetry = async () => {
     try {
-      const { data: liveData } = await axios.get('http://127.0.0.1:8000/api/telemetry');
+      const { data: liveData } = await axios.get(`${API_BASE_URL}/api/telemetry`);
       setCurrent(liveData);
 
-      const { data: historyData } = await axios.get('http://127.0.0.1:8000/api/history');
+      const { data: historyData } = await axios.get(`${API_BASE_URL}/api/history`);
       const chartData = historyData.map(row => ({
         ...row,
         time: new Date(row.timestamp).toLocaleTimeString(),
@@ -27,7 +29,7 @@ function App() {
   const handleGenerateReport = async () => {
     try {
       setReportStatus("Generating report...");
-      const { data } = await axios.get('http://127.0.0.1:8000/api/report');
+      const { data } = await axios.get(`${API_BASE_URL}/api/report`);
       setReportStatus(`Done. Found ${data.total_anomalies_detected} anomalies.`);
     } catch (err) {
       setReportStatus("Report generation failed.");
@@ -70,9 +72,9 @@ function App() {
       </main>
 
       <section className="chart-section">
-        <ResponsiveContainer width="100%" height={350}>
+        <ResponsiveContainer height={350} width="100%">
           <LineChart data={history}>
-            <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+            <CartesianGrid opacity={0.3} strokeDasharray="3 3" />
             <XAxis dataKey="time" />
             <YAxis yAxisId="left" domain={['dataMin - 5', 'dataMax + 5']} />
             <YAxis yAxisId="right" orientation="right" domain={[0, 7]} />

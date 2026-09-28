@@ -1,13 +1,23 @@
+import os
+import random
+from datetime import datetime
+import pandas as pd
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
-import random
-from datetime import datetime
-import pandas as pd
 
-# Database Setup
-engine = create_engine("sqlite:///./telemetry.db", connect_args={"check_same_thread": False})
+# Database Setup: Supports both local SQLite and Cloud PostgreSQL
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./telemetry.db")
+
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+if DATABASE_URL.startswith("sqlite"):
+    engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+else:
+    engine = create_engine(DATABASE_URL)
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -22,9 +32,14 @@ class TelemetryRecord(Base):
 
 Base.metadata.create_all(bind=engine)
 
-# FastAPI Setup
 app = FastAPI()
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+app.add_middleware(
+    CORSMiddleware, 
+    allow_origins=["*"], 
+    allow_methods=["*"], 
+    allow_headers=["*"]
+)
 
 sensor_state = {"temp": 75.0, "vib": 2.0}
 
